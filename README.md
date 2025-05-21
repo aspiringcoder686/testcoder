@@ -32,3 +32,5 @@ MyCompany.OnionApp.sln
     ├── MyCompany.Application.Tests/
     └── MyCompany.API.Tests/
 
+
+![image](https://github.com/user-attachments/assets/a90d880a-4476-4c07-a7b1-3aa04fb64f8f)
