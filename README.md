@@ -34,3 +34,6 @@ MyCompany.OnionApp.sln
 
 
 ![image](https://github.com/user-attachments/assets/a90d880a-4476-4c07-a7b1-3aa04fb64f8f)
+
+![image](https://github.com/user-attachments/assets/7d295f71-0653-4e86-9472-3f2b837bc4e8)
+
