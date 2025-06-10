@@ -78,10 +78,11 @@ namespace HbmToDapperConverter
                 Table = classElement.Attribute("table")?.Value,
                 Properties = new List<PropertyDefinition>(),
                 Relationships = new List<RelationshipDefinition>(),
-                Queries = new List<QueryDefinition>()
+                Queries = new List<QueryDefinition>(),
+                CompositeKey = new List<CompositeKeyDefinition>()
             };
 
-            // Include <id> as a property
+            // Handle <id>
             var idElement = classElement.Element(ns + "id");
             if (idElement != null)
             {
@@ -93,18 +94,44 @@ namespace HbmToDapperConverter
                 });
             }
 
-            // Include all <property>
+            // Handle <composite-id>
+            var compositeId = classElement.Element(ns + "composite-id");
+            if (compositeId != null)
+            {
+                foreach (var keyProp in compositeId.Elements(ns + "key-property"))
+                {
+                    entity.CompositeKey.Add(new CompositeKeyDefinition
+                    {
+                        Name = keyProp.Attribute("name")?.Value,
+                        Column = keyProp.Attribute("column")?.Value,
+                        Type = keyProp.Attribute("type")?.Value ?? "string"
+                    });
+                }
+
+                foreach (var keyRel in compositeId.Elements(ns + "key-many-to-one"))
+                {
+                    entity.CompositeKey.Add(new CompositeKeyDefinition
+                    {
+                        Name = keyRel.Attribute("name")?.Value,
+                        Column = keyRel.Attribute("column")?.Value,
+                        Type = "many-to-one",
+                        Class = NormalizeClassName(keyRel.Attribute("class")?.Value, parentNamespace)
+                    });
+                }
+            }
+
+            // Handle <property>
             foreach (var prop in classElement.Elements(ns + "property"))
             {
                 entity.Properties.Add(new PropertyDefinition
                 {
                     Name = prop.Attribute("name")?.Value,
-                    Column = prop.Attribute("column")?.Value,
+                    Column = prop.Attribute("column")?.Value ?? prop.Attribute("name")?.Value,
                     Type = prop.Attribute("type")?.Value ?? "string"
                 });
             }
 
-            // Relationships
+            // Handle <many-to-one> and <bag>
             foreach (var rel in classElement.Elements().Where(e => e.Name.LocalName == "many-to-one" || e.Name.LocalName == "bag"))
             {
                 var relDef = new RelationshipDefinition
@@ -118,7 +145,7 @@ namespace HbmToDapperConverter
                 {
                     string originalClass = rel.Attribute("class")?.Value;
                     string normalizedClass = NormalizeClassName(originalClass, parentNamespace);
-                    relDef.Class = normalizedClass; // ✅ THIS is what fixes your issue
+                    relDef.Class = normalizedClass;
                 }
                 else if (rel.Name.LocalName == "bag")
                 {
@@ -146,8 +173,7 @@ namespace HbmToDapperConverter
                 entity.Relationships.Add(relDef);
             }
 
-
-            // Add default ALL query
+            // Default ALL query
             if (!string.IsNullOrWhiteSpace(entity.Table))
             {
                 entity.Queries.Add(new QueryDefinition
@@ -157,14 +183,14 @@ namespace HbmToDapperConverter
                 });
             }
 
-
+            // Queries
             foreach (var query in doc.Descendants(ns + "query"))
             {
                 entity.Queries.Add(new QueryDefinition
                 {
                     Name = SimplifyQueryName(query.Attribute("name")?.Value),
-                    Sql = XmlGenerator.ConvertToNativeSql(query.Value?.Trim(), entity.Name, entity.Table)                
-
+                    Sql = XmlGenerator.ConvertToNativeSql(query.Value ?? string.Empty, entity.Name, entity.Table)
+            .Replace("\n", " ").Replace("\r", " ").Trim()
                 });
             }
 
@@ -173,7 +199,8 @@ namespace HbmToDapperConverter
                 entity.Queries.Add(new QueryDefinition
                 {
                     Name = SimplifyQueryName(query.Attribute("name")?.Value),
-                    Sql = XmlGenerator.ConvertToNativeSql(query.Value?.Trim(), entity.Name, entity.Table)
+                    Sql = XmlGenerator.ConvertToNativeSql(query.Value ?? string.Empty, entity.Name, entity.Table)
+            .Replace("\n", " ").Replace("\r", " ").Trim()
                 });
             }
 
@@ -183,24 +210,18 @@ namespace HbmToDapperConverter
         private static string SimplifyQueryName(string name)
         {
             if (string.IsNullOrWhiteSpace(name)) return name;
-            return name.Split('.').Last(); // keeps only the final part
+            return name.Split('.').Last();
         }
 
         private static string NormalizeClassName(string originalClass, string parentNamespace)
         {
-            if (string.IsNullOrWhiteSpace(originalClass))
-                return null;
-
-            if (originalClass.StartsWith("Business.AMS"))
-                return originalClass;
-
-            if (!originalClass.Contains('.'))
-                return $"{parentNamespace}.{originalClass}";
-
+            if (string.IsNullOrWhiteSpace(originalClass)) return null;
+            if (originalClass.StartsWith("Business.AMS")) return originalClass;
+            if (!originalClass.Contains('.')) return $"{parentNamespace}.{originalClass}";
             return originalClass;
         }
-
     }
+
 
 
 
@@ -503,6 +524,17 @@ namespace HbmToDapperConverter
             hql = fromRegex.Replace(hql, m => $"SELECT * FROM {tableName} {m.Groups[1].Value}");
 
             hql = hql.Replace("left join", "LEFT JOIN").Replace("fetch", "");
+
+            Regex paramPattern = new(@"(\b[\w]+\.)?(\w+)\s*(=|<>|!=|>=|<=|>|<)\s*\?", RegexOptions.IgnoreCase);
+
+            hql = paramPattern.Replace(hql, match =>
+            {
+                string columnName = match.Groups[2].Value;
+                string replacement = match.Value.Replace("?", "@" + columnName);
+                return replacement;
+            });
+
+
             return hql.Trim();
         }
     }
@@ -563,10 +595,13 @@ namespace HbmToDapperConverter
     {
         public string Name { get; set; }
         public string Table { get; set; }
-        //public string IdColumn { get; set; }
         public List<PropertyDefinition> Properties { get; set; }
+
+        public List<CompositeKeyDefinition> CompositeKey { get; set; } = new();
         public List<RelationshipDefinition> Relationships { get; set; }
         public List<QueryDefinition> Queries { get; set; }
+
+        
     }
 
     public class PropertyDefinition
@@ -579,9 +614,9 @@ namespace HbmToDapperConverter
     public class RelationshipDefinition
     {
         public string Name { get; set; }
-        public string Type { get; set; }  // bag, many-to-one, one-to-many, etc.
-        public string InnerType { get; set; } // one-to-many or many-to-many inside bag
-        public string Class { get; set; } // fallback
+        public string Type { get; set; }  // bag, many-to-one, etc.
+        public string InnerType { get; set; }
+        public string Class { get; set; }
         public string OneToManyClass { get; set; }
         public string ManyToManyClass { get; set; }
         public string Column { get; set; }
@@ -592,4 +627,13 @@ namespace HbmToDapperConverter
         public string Name { get; set; }
         public string Sql { get; set; }
     }
+
+    public class CompositeKeyDefinition
+    {
+        public string Name { get; set; }
+        public string Column { get; set; }
+        public string Type { get; set; } // "string" or "many-to-one"
+        public string Class { get; set; } // only for many-to-one
+    }
+
 }
