@@ -1,61 +1,45 @@
-    public static string ConvertToNativeSql(string hql, string entityName, string tableName, EntityDefinition entity)
-    {
-        if (string.IsNullOrWhiteSpace(hql)) return hql;
+CompositeKey = new List<CompositeKeyDefinition>(),
+Components = new List<ComponentDefinition>(),
+    
+foreach (var comp in classElement.Elements(ns + "component"))
+ {
+     var compDef = new ComponentDefinition
+     {
+         Name = comp.Attribute("name")?.Value,
+         Class = comp.Attribute("class")?.Value,
+         Properties = new List<PropertyDefinition>(),
+         Relationships = new List<RelationshipDefinition>()
+     };
 
-        hql = hql.Trim();
+     foreach (var prop in comp.Elements(ns + "property"))
+     {
+         compDef.Properties.Add(new PropertyDefinition
+         {
+             Name = prop.Attribute("name")?.Value,
+             Column = prop.Attribute("column")?.Value ?? prop.Attribute("name")?.Value,
+             Type = prop.Attribute("type")?.Value ?? "string"
+         });
+     }
 
-        // Step 1: Detect alias
-        var aliasPattern = new Regex($@"from\s+{entityName}\s+(\w+)", RegexOptions.IgnoreCase);
-        var aliasMatch = aliasPattern.Match(hql);
-        string alias = aliasMatch.Success ? aliasMatch.Groups[1].Value : entityName;
-        string aliasSql = $"[{alias}]";
+     foreach (var rel in comp.Elements(ns + "many-to-one"))
+     {
+         compDef.Relationships.Add(new RelationshipDefinition
+         {
+             Name = rel.Attribute("name")?.Value,
+             Type = "many-to-one",
+             Class = rel.Attribute("class")?.Value,
+             Column = rel.Attribute("column")?.Value
+         });
+     }
 
-        string fromClause = $"FROM {tableName} {aliasSql}";
+     entity.Components.Add(compDef);
+ }
 
-        // Step 2: Inject SELECT * if missing
-        if (hql.StartsWith("from", StringComparison.OrdinalIgnoreCase))
-        {
-            hql = Regex.Replace(hql, $@"from\s+{entityName}(\s+\w+)?", fromClause, RegexOptions.IgnoreCase);
-            hql = "SELECT * " + hql;
-        }
-        else
-        {
-            hql = Regex.Replace(hql, $@"select\s+(distinct\s+)?\w+\s+from\s+{entityName}\s+\w+", $"SELECT $1* {fromClause}", RegexOptions.IgnoreCase);
-        }
 
-        // Step 3: Remove 'fetch'
-        hql = hql.Replace("fetch", "", StringComparison.OrdinalIgnoreCase);
-
-        // Step 4: Replace ? with @ColumnName
-        Regex paramPattern = new(@"(\b[\w]+\.)?(\w+)\s*(=|<>|!=|>=|<=|>|<)\s*\?", RegexOptions.IgnoreCase);
-        hql = paramPattern.Replace(hql, match =>
-        {
-            string columnName = match.Groups[2].Value;
-            return match.Value.Replace("?", "@" + columnName);
-        });
-
-        // Step 5: Format alias references with brackets
-        if (!string.IsNullOrWhiteSpace(alias))
-        {
-            var aliasRefPattern = new Regex($@"\b{alias}\.(\w+)\b", RegexOptions.IgnoreCase);
-            hql = aliasRefPattern.Replace(hql, m => $"[{alias}].{m.Groups[1].Value}");
-        }
-
-        // Step 6: Replace [alias].Property with mapped [alias].Column
-        foreach (var prop in entity.Properties)
-        {
-            if (!string.IsNullOrWhiteSpace(prop.Name) && !string.IsNullOrWhiteSpace(prop.Column) &&
-                !prop.Name.Equals(prop.Column, StringComparison.OrdinalIgnoreCase))
-            {
-                string propPattern = $@"\[{alias}\]\.{Regex.Escape(prop.Name)}\b";
-                hql = Regex.Replace(hql, propPattern, $"[{alias}].{prop.Column}", RegexOptions.IgnoreCase);
-            }
-        }
-
-        // Step 7: Normalize whitespace
-        hql = hql.Replace("\n", " ").Replace("\r", " ").Trim();
-
-        return hql;
-    }
-
+public class ComponentDefinition
+{
+    public string Name { get; set; }
+    public string Class { get; set; }
+    public List<PropertyDefinition> Properties { get; set; } = new();
+    public List<RelationshipDefinition> Relationships { get; set; } = new();
 }
