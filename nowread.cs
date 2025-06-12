@@ -1,4 +1,4 @@
- public static string ConvertToNativeSql(string hql, string entityName, string tableName, EntityDefinition entity)
+public static string ConvertToNativeSql(string hql, string entityName, string tableName, EntityDefinition entity)
     {
         if (string.IsNullOrWhiteSpace(hql)) return hql;
 
@@ -27,26 +27,14 @@
         {
             string property = match.Groups[2].Value;
             string fullMatch = match.Groups[0].Value;
-
-            var prop = entity.Properties.FirstOrDefault(p => p.Name == property);
-            if (prop != null)
-                return fullMatch.Replace("?", "@" + prop.Column);
-
-            var rel = entity.Relationships.FirstOrDefault(r => property.StartsWith(r.Name + "."));
-            if (rel != null && property.EndsWith(".Id"))
-                return fullMatch.Replace("?", "@" + rel.Column);
-
             return fullMatch.Replace("?", "@" + property);
         });
 
-        Regex likePattern = new(@"(\b[\w]+\.[\w]+)\s+like\s+\?", RegexOptions.IgnoreCase);
+        Regex likePattern = new(@"(\b[\w]+\.)?(\w+)\s+like\s+\?", RegexOptions.IgnoreCase);
         hql = likePattern.Replace(hql, match =>
         {
-            string leftSide = match.Groups[1].Value;
-            string relName = leftSide.Split('.').Last();
-            var rel = entity.Relationships.FirstOrDefault(r => leftSide.Contains(r.Name));
-            var col = rel?.Column ?? relName;
-            return $"{leftSide} like @{col}";
+            string property = match.Groups[2].Value;
+            return match.Value.Replace("?", "@" + property);
         });
 
         Regex betweenPattern = new(@"(\b[\w]+\.[\w]+)\s+between\s+\?\s+and\s+\?", RegexOptions.IgnoreCase);
@@ -78,6 +66,7 @@
             {
                 string relPattern = $"\\[{alias}\\]\\.{Regex.Escape(rel.Name)}\\.Id";
                 hql = Regex.Replace(hql, relPattern, $"[{alias}].{rel.Column}", RegexOptions.IgnoreCase);
+                hql = Regex.Replace(hql, $"@{Regex.Escape(rel.Name)}\\.Id\\b", $"@{rel.Column}", RegexOptions.IgnoreCase);
             }
         }
 
