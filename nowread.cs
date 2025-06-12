@@ -1,96 +1,86 @@
- public static string Generate(EntityDefinition entity)
+ public static string ConvertToNativeSql(string hql, string entityName, string tableName, EntityDefinition entity)
     {
-        var doc = new XDocument(new XDeclaration("1.0", "utf-8", null),
-            new XElement("entity",
-                new XAttribute("entity", entity.Name ?? string.Empty),
-                new XAttribute("table", entity.Table ?? string.Empty),
-                new XElement("id",
-                    new XAttribute("column", entity.Properties.FirstOrDefault()?.Column ?? string.Empty)
-                ),
-                new XElement("properties",
-                    entity.Properties.Select(p =>
-                        new XElement("property",
-                            new XAttribute("name", p.Name ?? string.Empty),
-                            new XAttribute("column", p.Column ?? string.Empty),
-                            new XAttribute("type", p.Type ?? "string")
-                        ))
-                ),
-                new XElement("compositeKey",
-                    entity.CompositeKey.Select(k =>
-                        new XElement(k.Type == "many-to-one" ? "key-many-to-one" : "key-property",
-                            new XAttribute("name", k.Name ?? string.Empty),
-                            new XAttribute("column", k.Column ?? string.Empty),
-                            k.Type == "many-to-one" ? new XAttribute("class", k.Class ?? string.Empty) : null
-                        ))
-                ),
-                new XElement("relationships",
-                    entity.Relationships.Select(r =>
-                        new XElement("relationship",
-                            new XAttribute("name", r.Name ?? string.Empty),
-                            new XAttribute("type", r.Type ?? string.Empty),
-                            new XAttribute("class", r.Class ?? string.Empty),
-                            new XAttribute("column", r.Column ?? string.Empty)
-                        ))
-                ),
-                new XElement("components",
-                    entity.Components.Select(c =>
-                        new XElement("component",
-                            new XAttribute("name", c.Name ?? string.Empty),
-                            new XAttribute("class", c.Class ?? string.Empty),
-                            c.Properties.Select(p =>
-                                new XElement("property",
-                                    new XAttribute("name", p.Name ?? string.Empty),
-                                    new XAttribute("column", p.Column ?? string.Empty),
-                                    new XAttribute("type", p.Type ?? "string")
-                                )
-                            ).Concat(
-                                c.Relationships.Select(r =>
-                                    new XElement("relationship",
-                                        new XAttribute("name", r.Name ?? string.Empty),
-                                        new XAttribute("type", r.Type ?? string.Empty),
-                                        new XAttribute("class", r.Class ?? string.Empty),
-                                        new XAttribute("column", r.Column ?? string.Empty)
-                                    )
-                                )
-                            )
-                        )
-                    )
-                ),
-                new XElement("queries",
-                    entity.Queries.Select(q =>
-                    {
-                        var paramElements = new List<XElement>();
-                        var namedParams = Regex.Matches(q.Sql ?? string.Empty, "[:@]([a-zA-Z_][a-zA-Z0-9_]*)");
-                        foreach (Match match in namedParams)
-                        {
-                            var value = match.Groups[1].Value;
-                            if (!string.IsNullOrWhiteSpace(value) && !paramElements.Any(p => p.Attribute("name")?.Value == value))
-                            {
-                                string type = value.ToLower().Contains("id") ? "guid" : "string";
-                                paramElements.Add(new XElement("param",
-                                    new XAttribute("name", value),
-                                    new XAttribute("type", type)
-                                ));
-                            }
-                        }
+        if (string.IsNullOrWhiteSpace(hql)) return hql;
 
-                        int questionCount = Regex.Matches(q.Sql ?? string.Empty, "\\?").Count;
-                        for (int i = 1; i <= questionCount; i++)
-                        {
-                            paramElements.Add(new XElement("param",
-                                new XAttribute("name", $"param{i}"),
-                                new XAttribute("type", "string")));
-                        }
+        hql = hql.Trim();
 
-                        return new XElement("query",
-                            new XAttribute("name", q.Name ?? string.Empty),
-                            new XElement("sql", ConvertToNativeSql(q.Sql, entity.Name, entity.Table, entity)),
-                            paramElements.Any() ? new XElement("parameters", paramElements) : null
-                        );
-                    })
-                )
-            )
-        );
+        var aliasPattern = new Regex($"from\\s+{entityName}\\s+(\\w+)", RegexOptions.IgnoreCase);
+        var aliasMatch = aliasPattern.Match(hql);
+        string alias = aliasMatch.Success ? aliasMatch.Groups[1].Value : entityName;
+        string aliasSql = $"[{alias}]";
+        string fromClause = $"FROM {tableName} {aliasSql}";
 
-        return doc.ToString();
+        if (hql.StartsWith("from", StringComparison.OrdinalIgnoreCase))
+        {
+            hql = Regex.Replace(hql, $"from\\s+{entityName}(\\s+\\w+)?", fromClause, RegexOptions.IgnoreCase);
+            hql = "SELECT * " + hql;
+        }
+        else
+        {
+            hql = Regex.Replace(hql, $"select\\s+(distinct\\s+)?\\w+\\s+from\\s+{entityName}\\s+\\w+", $"SELECT $1* {fromClause}", RegexOptions.IgnoreCase);
+        }
+
+        hql = hql.Replace("fetch", "", StringComparison.OrdinalIgnoreCase);
+
+        Regex paramPattern = new(@"(\b[\w]+\.)?(\w+)\s*(=|<>|!=|>=|<=|>|<)\s*\?", RegexOptions.IgnoreCase);
+        hql = paramPattern.Replace(hql, match =>
+        {
+            string property = match.Groups[2].Value;
+            string fullMatch = match.Groups[0].Value;
+
+            var prop = entity.Properties.FirstOrDefault(p => p.Name == property);
+            if (prop != null)
+                return fullMatch.Replace("?", "@" + prop.Column);
+
+            var rel = entity.Relationships.FirstOrDefault(r => property.StartsWith(r.Name + "."));
+            if (rel != null && property.EndsWith(".Id"))
+                return fullMatch.Replace("?", "@" + rel.Column);
+
+            return fullMatch.Replace("?", "@" + property);
+        });
+
+        Regex likePattern = new(@"(\b[\w]+\.[\w]+)\s+like\s+\?", RegexOptions.IgnoreCase);
+        hql = likePattern.Replace(hql, match =>
+        {
+            string leftSide = match.Groups[1].Value;
+            string relName = leftSide.Split('.').Last();
+            var rel = entity.Relationships.FirstOrDefault(r => leftSide.Contains(r.Name));
+            var col = rel?.Column ?? relName;
+            return $"{leftSide} like @{col}";
+        });
+
+        Regex betweenPattern = new(@"(\b[\w]+\.[\w]+)\s+between\s+\?\s+and\s+\?", RegexOptions.IgnoreCase);
+        hql = betweenPattern.Replace(hql, match =>
+        {
+            string leftSide = match.Groups[1].Value;
+            return $"{leftSide} between @Min and @Max";
+        });
+
+        if (!string.IsNullOrWhiteSpace(alias))
+        {
+            var aliasRefPattern = new Regex($"\\b{alias}\\.(\\w+)", RegexOptions.IgnoreCase);
+            hql = aliasRefPattern.Replace(hql, m => $"[{alias}].{m.Groups[1].Value}");
+        }
+
+        foreach (var prop in entity.Properties)
+        {
+            if (!string.IsNullOrWhiteSpace(prop.Name) && !string.IsNullOrWhiteSpace(prop.Column) &&
+                !prop.Name.Equals(prop.Column, StringComparison.OrdinalIgnoreCase))
+            {
+                string propPattern = $"\\[{alias}\\]\\.{Regex.Escape(prop.Name)}\\b";
+                hql = Regex.Replace(hql, propPattern, $"[{alias}].{prop.Column}", RegexOptions.IgnoreCase);
+            }
+        }
+
+        foreach (var rel in entity.Relationships)
+        {
+            if (!string.IsNullOrWhiteSpace(rel.Name) && !string.IsNullOrWhiteSpace(rel.Column))
+            {
+                string relPattern = $"\\[{alias}\\]\\.{Regex.Escape(rel.Name)}\\.Id";
+                hql = Regex.Replace(hql, relPattern, $"[{alias}].{rel.Column}", RegexOptions.IgnoreCase);
+            }
+        }
+
+        hql = hql.Replace("\n", " ").Replace("\r", " ").Trim();
+        return hql;
     }
