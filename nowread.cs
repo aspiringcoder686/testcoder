@@ -1,28 +1,48 @@
- // Default FindById query if ID present and not already added
- bool hasId = entity.Properties.Any(p => p.Name.Equals("Id", StringComparison.OrdinalIgnoreCase) || p.Name.ToLower().Contains("id"))
-              || entity.CompositeKey.Any();
+ NumberOfLines = File.ReadAllLines(file).Length
 
- bool hasFindById = entity.Queries.Any(q => q.Name.Equals("FindById", StringComparison.OrdinalIgnoreCase));
+  var methodRegex = new Regex(@"(public|private|protected|internal)\s+(static\s+)?\S+\s+(?<name>\S+)\s*\(.*?\)\s*{");
+                var ajaxRegex = new Regex(@"\[AjaxMethod\]", RegexOptions.IgnoreCase);
+                var paramRegex = new Regex(@"Request\.(QueryString|Params|Form|Cookies|ServerVariables)", RegexOptions.IgnoreCase);
 
+                var methodMatches = methodRegex.Matches(content);
 
- if (hasId && !hasFindById)
- {
-     string whereClause = "";
+                foreach (Match m in methodMatches)
+                {
+                    string methodName = m.Groups["name"].Value;
 
-     if (entity.CompositeKey.Any())
-     {
-         whereClause = string.Join(" AND ", entity.CompositeKey.Select(k => $"{k.Column} = @{k.Column}"));
-     }
-     else
-     {
-         var idProp = entity.Properties.First(p => p.Name.Equals("Id", StringComparison.OrdinalIgnoreCase) || p.Name.ToLower().Contains("id"));
-         whereClause = $"{idProp.Column} = @{idProp.Column}";
-     }
-     //var idProp = entity.Properties.First(p => p.Name.Equals("Id", StringComparison.OrdinalIgnoreCase) || p.Name.ToLower().Contains("id"));
-     //whereClause = $"{idProp.Column} = @{idProp.Column}";
-     entity.Queries.Add(new QueryDefinition
-     {
-         Name = "FindById",
-         Sql = $"SELECT * FROM {entity.Table} WHERE {whereClause}"
-     });
- }
+                    var beforeMethod = content.Substring(0, m.Index);
+                    bool isAjax = ajaxRegex.Matches(beforeMethod).Count > 0;
+
+                    bool usesParam = false;
+                    int numLines = 0;
+
+                    int braceIndex = content.IndexOf('{', m.Index);
+                    if (braceIndex >= 0)
+                    {
+                        int level = 1;
+                        int i = braceIndex + 1;
+                        while (i < content.Length && level > 0)
+                        {
+                            if (content[i] == '{') level++;
+                            else if (content[i] == '}') level--;
+                            i++;
+                        }
+
+                        if (i > braceIndex)
+                        {
+                            var methodBody = content.Substring(braceIndex, i - braceIndex);
+                            usesParam = paramRegex.IsMatch(methodBody);
+                            numLines = methodBody.Split('\n').Length;
+                        }
+                    }
+
+                    methodDetails.Add(new MethodDetail
+                    {
+                        FileName = Path.GetFileName(file),
+                        MethodName = methodName,
+                        IsAjaxMethod = isAjax ? "Yes" : "No",
+                        UsesParameter = usesParam ? "Yes" : "No",
+                        NumberOfLines = numLines
+                    });
+                }
+            }
