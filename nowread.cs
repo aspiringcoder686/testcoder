@@ -1,5 +1,5 @@
 public string PageUsedInWebsite { get; set; }
-
+string aspxName = Path.GetFileNameWithoutExtension(file) + ".aspx";
 
 string reactPath = Console.ReadLine();
 
