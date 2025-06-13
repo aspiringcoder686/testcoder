@@ -1,28 +1,28 @@
-public string PageUsedInWebsite { get; set; }
-string aspxName = Path.GetFileNameWithoutExtension(file) + ".aspx";
+ // Default FindById query if ID present and not already added
+ bool hasId = entity.Properties.Any(p => p.Name.Equals("Id", StringComparison.OrdinalIgnoreCase) || p.Name.ToLower().Contains("id"))
+              || entity.CompositeKey.Any();
 
-string reactPath = Console.ReadLine();
+ bool hasFindById = entity.Queries.Any(q => q.Name.Equals("FindById", StringComparison.OrdinalIgnoreCase));
 
 
-var reactFiles = Directory.EnumerateFiles(reactPath, "*.*", SearchOption.AllDirectories)
-    .Where(f => f.EndsWith(".js", StringComparison.OrdinalIgnoreCase) ||
-                f.EndsWith(".jsx", StringComparison.OrdinalIgnoreCase) ||
-                f.EndsWith(".ts", StringComparison.OrdinalIgnoreCase) ||
-                f.EndsWith(".tsx", StringComparison.OrdinalIgnoreCase))
-    .ToList();
+ if (hasId && !hasFindById)
+ {
+     string whereClause = "";
 
-foreach (var reactFile in reactFiles)
-{
-    var content = File.ReadAllText(reactFile);
-    if (content.Contains(aspxName, StringComparison.OrdinalIgnoreCase))
-    {
-        usedInReact = true;
-        break;
-    }
-}
-
-fileResult.PageUsedInWebsite = usedInReact ? "Yes" : "No";
-
-wsSummary.Cell(1, 6).Value = "Page Used In Website";
-// ...
-wsSummary.Cell(row, 6).Value = file.PageUsedInWebsite;
+     if (entity.CompositeKey.Any())
+     {
+         whereClause = string.Join(" AND ", entity.CompositeKey.Select(k => $"{k.Column} = @{k.Column}"));
+     }
+     else
+     {
+         var idProp = entity.Properties.First(p => p.Name.Equals("Id", StringComparison.OrdinalIgnoreCase) || p.Name.ToLower().Contains("id"));
+         whereClause = $"{idProp.Column} = @{idProp.Column}";
+     }
+     //var idProp = entity.Properties.First(p => p.Name.Equals("Id", StringComparison.OrdinalIgnoreCase) || p.Name.ToLower().Contains("id"));
+     //whereClause = $"{idProp.Column} = @{idProp.Column}";
+     entity.Queries.Add(new QueryDefinition
+     {
+         Name = "FindById",
+         Sql = $"SELECT * FROM {entity.Table} WHERE {whereClause}"
+     });
+ }
