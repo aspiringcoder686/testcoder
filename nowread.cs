@@ -1,14 +1,28 @@
-var files = Directory.EnumerateFiles(projectPath, "*.aspx.cs", SearchOption.AllDirectories).ToList();
+public string PageUsedInWebsite { get; set; }
 
-if (files.Count == 0)
+
+string reactPath = Console.ReadLine();
+
+
+var reactFiles = Directory.EnumerateFiles(reactPath, "*.*", SearchOption.AllDirectories)
+    .Where(f => f.EndsWith(".js", StringComparison.OrdinalIgnoreCase) ||
+                f.EndsWith(".jsx", StringComparison.OrdinalIgnoreCase) ||
+                f.EndsWith(".ts", StringComparison.OrdinalIgnoreCase) ||
+                f.EndsWith(".tsx", StringComparison.OrdinalIgnoreCase))
+    .ToList();
+
+foreach (var reactFile in reactFiles)
 {
-    Console.WriteLine("⚠ No .aspx.cs files found in the directory or subdirectories.");
-}
-else
-{
-    Console.WriteLine($"Found {files.Count} .aspx.cs files:");
-    foreach (var file in files)
+    var content = File.ReadAllText(reactFile);
+    if (content.Contains(aspxName, StringComparison.OrdinalIgnoreCase))
     {
-        Console.WriteLine($" - {file}");
+        usedInReact = true;
+        break;
     }
 }
+
+fileResult.PageUsedInWebsite = usedInReact ? "Yes" : "No";
+
+wsSummary.Cell(1, 6).Value = "Page Used In Website";
+// ...
+wsSummary.Cell(row, 6).Value = file.PageUsedInWebsite;
