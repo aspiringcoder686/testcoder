@@ -1,54 +1,36 @@
-using System.Web;
 using NHibernate;
 using NHibernate.Cfg;
-using log4net;
 
-public class MvcApplication : HttpApplication
+public static class NHibernateInitializer
 {
-    public static ISessionFactory SessionFactory;
+    private static ISessionFactory _sessionFactory;
 
-    protected void Application_Start()
+    public static ISessionFactory Initialize()
     {
-        // Initialize log4net
-        log4net.Config.XmlConfigurator.Configure();
+        if (_sessionFactory != null)
+            return _sessionFactory;
 
-        // Initialize NHibernate
         var cfg = new Configuration();
 
-        cfg.SetProperty(NHibernate.Cfg.Environment.ConnectionString, "YOUR_CONNECTION_STRING_HERE");
+        // Your connection and dialect
+        cfg.SetProperty(NHibernate.Cfg.Environment.ConnectionString, "Data Source=YOUR_SERVER;Initial Catalog=YOUR_DB;Integrated Security=True");
         cfg.SetProperty(NHibernate.Cfg.Environment.Dialect, "NHibernate.Dialect.MsSql2012Dialect");
-        cfg.SetProperty(NHibernate.Cfg.Environment.ShowSql, "true");    // For Output window
-        cfg.SetProperty(NHibernate.Cfg.Environment.FormatSql, "true");  // Nicely formatted SQL
-        cfg.SetProperty(NHibernate.Cfg.Environment.GenerateStatistics, "true"); // Optional: more metrics
 
-        // Add your mappings here
-        cfg.AddAssembly(typeof(YourEntity).Assembly);  // Example
+        // 👇 ADD THESE TWO LINES
+        cfg.SetProperty(NHibernate.Cfg.Environment.ShowSql, "true");     // This shows the SQL
+        cfg.SetProperty(NHibernate.Cfg.Environment.FormatSql, "true");   // Nicely formats the SQL
 
-        SessionFactory = cfg.BuildSessionFactory();
+        // Load mappings (XML or assembly)
+        cfg.AddAssembly(typeof(YourEntityClass).Assembly);  // Replace with one of your mapped entities
+
+        _sessionFactory = cfg.BuildSessionFactory();
+
+        return _sessionFactory;
     }
 }
 
 
-<configSections>
-  <section name="log4net" type="log4net.Config.Log4NetConfigurationSectionHandler, log4net" />
-</configSections>
-
-<log4net>
-  <appender name="FileAppender" type="log4net.Appender.FileAppender">
-    <file value="App_Data\\NHibernateSQL.log" />
-    <appendToFile value="true" />
-    <layout type="log4net.Layout.PatternLayout">
-      <conversionPattern value="%date %-5level %logger - %message%newline" />
-    </layout>
-  </appender>
-
-  <logger name="NHibernate.SQL">
-    <level value="DEBUG" />
-    <appender-ref ref="FileAppender" />
-  </logger>
-
-  <root>
-    <level value="WARN" />
-    <appender-ref ref="FileAppender" />
-  </root>
-</log4net>
+using (var session = NHibernateInitializer.Initialize().OpenSession())
+{
+    // Your existing code
+}
