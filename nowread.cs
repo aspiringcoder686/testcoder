@@ -95,7 +95,7 @@ public static EntityDefinition Parse(string path)
             {
                 Name = rel.Attribute("name")?.Value,
                 Type = "many-to-one",
-                Class = rel.Attribute("class")?.Value,
+                Class = NormalizeClassName(rel.Attribute("class")?.Value, parentNamespace),
                 SourceColumn = rel.Attribute("column")?.Value
             });
         }
@@ -123,7 +123,7 @@ public static EntityDefinition Parse(string path)
             {
                 Name = rel.Attribute("name")?.Value,
                 Type = "many-to-one",
-                Class = rel.Attribute("class")?.Value,
+                Class = NormalizeClassName(rel.Attribute("class")?.Value, parentNamespace),
                 SourceColumn = rel.Attribute("column")?.Value,
                 Cascade = rel.Attribute("cascade")?.Value,
                 NotFound = rel.Attribute("not-found")?.Value
@@ -135,7 +135,7 @@ public static EntityDefinition Parse(string path)
             {
                 Name = rel.Attribute("name")?.Value,
                 Type = "one-to-one",
-                Class = rel.Attribute("class")?.Value,
+                Class = NormalizeClassName(rel.Attribute("class")?.Value, parentNamespace),
                 PropertyRef = rel.Attribute("property-ref")?.Value,
                 Cascade = rel.Attribute("cascade")?.Value
             });
@@ -159,16 +159,14 @@ public static EntityDefinition Parse(string path)
 
             if (manyToMany != null)
             {
-                string normalizedClass = NormalizeClassName(manyToMany.Attribute("class")?.Value, parentNamespace);
-                relDef.Class = normalizedClass;
+                relDef.Class = NormalizeClassName(manyToMany.Attribute("class")?.Value, parentNamespace);
                 relDef.InnerType = "many-to-many";
                 relDef.DestinationColumn = manyToMany.Attribute("column")?.Value;
                 relDef.NotFound = manyToMany.Attribute("not-found")?.Value;
             }
             else if (oneToMany != null)
             {
-                string normalizedClass = NormalizeClassName(oneToMany.Attribute("class")?.Value, parentNamespace);
-                relDef.Class = normalizedClass;
+                relDef.Class = NormalizeClassName(oneToMany.Attribute("class")?.Value, parentNamespace);
                 relDef.InnerType = "one-to-many";
                 relDef.DestinationColumn = relDef.SourceColumn;
                 relDef.NotFound = oneToMany.Attribute("not-found")?.Value;
@@ -178,7 +176,7 @@ public static EntityDefinition Parse(string path)
         }
     }
 
-    // Queries (same as before)
+    // Queries + FindById (same as your existing logic)
     if (!string.IsNullOrWhiteSpace(entity.Table))
     {
         entity.Queries.Add(new QueryDefinition
@@ -211,7 +209,6 @@ public static EntityDefinition Parse(string path)
         });
     }
 
-    // FindById
     bool hasId = entity.Properties.Any(p => p.IsPrimary == true)
                   || (entity.CompositeKey != null && entity.CompositeKey.Count != 0);
 
@@ -238,4 +235,10 @@ public static EntityDefinition Parse(string path)
     }
 
     return entity;
+}
+private static string NormalizeClassName(string? className, string parentNamespace)
+{
+    if (string.IsNullOrWhiteSpace(className)) return string.Empty;
+    if (className.Contains(".")) return className; 
+    return string.IsNullOrWhiteSpace(parentNamespace) ? className : $"{parentNamespace}.{className}";
 }
