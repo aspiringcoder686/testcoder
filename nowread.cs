@@ -1,105 +1,69 @@
 using System;
-using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
-using System.Text;
-using System.Web;
-using log4net.Appender;
-using log4net.Core;
+using System.Linq;
+using System.Xml.Linq;
 
-public class NHibernateGroupedSqlAppender : AppenderSkeleton
+class XmlPropertyScraper
 {
-    private static readonly ConcurrentDictionary<string, StringBuilder> _buffers = new();
-    private static readonly ConcurrentDictionary<string, string> _requestInfo = new();
-
-    public string FilePath { get; set; }
-
-    protected override void Append(LoggingEvent loggingEvent)
+    static void Main()
     {
-        if (loggingEvent.LoggerName != "NHibernate.SQL")
-            return;
+        string inputFolder = @"C:\YourXmlFolderPath"; // 🔑 Set your XML folder
+        string outputTxtFile = @"C:\YourOutputPath\XmlPropertiesSummary.txt"; // 🔑 Text output
+        string outputCsvFile = @"C:\YourOutputPath\XmlPropertiesSummary.csv"; // 🔑 CSV output
 
-        var requestId = GetRequestId();
-        var sb = _buffers.GetOrAdd(requestId, _ => new StringBuilder());
+        var propertyAttributesMap = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 
-        sb.AppendLine(RenderLoggingEvent(loggingEvent));
-    }
-
-    public static void SetRequestInfo(string requestId, string info)
-    {
-        _requestInfo[requestId] = info;
-    }
-
-    public static void Flush(string requestId, NHibernateGroupedSqlAppender appender)
-    {
-        if (_buffers.TryRemove(requestId, out var sb))
+        // Collect properties and attributes
+        foreach (var file in Directory.GetFiles(inputFolder, "*.xml", SearchOption.AllDirectories))
         {
-            _requestInfo.TryRemove(requestId, out var info);
+            try
+            {
+                var doc = XDocument.Load(file);
+                foreach (var element in doc.Descendants())
+                {
+                    var propertyName = element.Name.LocalName;
+                    if (!propertyAttributesMap.ContainsKey(propertyName))
+                        propertyAttributesMap[propertyName] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            var output = new StringBuilder();
-            output.AppendLine($"--- Starts request SQL [{info}] ---");
-            output.Append(sb);
-            output.AppendLine($"--- Ends request SQL [{info}] ---");
-
-            File.AppendAllText(appender.FilePath, output.ToString());
+                    foreach (var attr in element.Attributes())
+                    {
+                        propertyAttributesMap[propertyName].Add(attr.Name.LocalName);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error processing {file}: {ex.Message}");
+            }
         }
-    }
 
-   private string GetRequestId()
-{
-    var ctx = HttpContext.Current;
-    if (ctx != null)
-    {
-        // Generate unique ID per request
-        if (ctx.Items["NHibernateRequestId"] == null)
+        // Write TXT
+        using (var writer = new StreamWriter(outputTxtFile))
         {
-            ctx.Items["NHibernateRequestId"] = Guid.NewGuid().ToString();
+            foreach (var kvp in propertyAttributesMap.OrderBy(k => k.Key))
+            {
+                writer.WriteLine($"property: {kvp.Key}");
+                writer.WriteLine($" attribute: {string.Join(", ", kvp.Value.OrderBy(a => a))}");
+            }
         }
-        return ctx.Items["NHibernateRequestId"].ToString();
-    }
 
-    // Fallback: thread ID
-    return System.Threading.Thread.CurrentThread.ManagedThreadId.ToString();
-}
-}
-
-
-protected void Application_BeginRequest(object sender, EventArgs e)
-{
-    var request = HttpContext.Current.Request;
-    var method = request.HttpMethod.ToUpper();
-    var url = request.Url.AbsolutePath;
-    var query = request.QueryString.ToString();
-    var fullUrl = !string.IsNullOrEmpty(query) ? $"{url}?{query}" : url;
-
-    var requestId = GetRequestId();
-    NHibernateGroupedSqlAppender.SetRequestInfo(requestId, $"{method}: {fullUrl}");
-}
-
-protected void Application_EndRequest(object sender, EventArgs e)
-{
-    var repo = log4net.LogManager.GetRepository();
-    foreach (var appender in repo.GetAppenders())
-    {
-        if (appender is NHibernateGroupedSqlAppender customAppender)
+        // Write CSV
+        using (var writer = new StreamWriter(outputCsvFile))
         {
-            var requestId = GetRequestId();
-            NHibernateGroupedSqlAppender.Flush(requestId, customAppender);
+            writer.WriteLine("SNo,Property,Attribute");
+            int sno = 1;
+            foreach (var kvp in propertyAttributesMap.OrderBy(k => k.Key))
+            {
+                foreach (var attr in kvp.Value.OrderBy(a => a))
+                {
+                    writer.WriteLine($"{sno},{kvp.Key},{attr}");
+                    sno++;
+                }
+            }
         }
+
+        Console.WriteLine($"Done. TXT output: {outputTxtFile}");
+        Console.WriteLine($"Done. CSV output: {outputCsvFile}");
     }
 }
-    private string GetRequestId()
-{
-    var ctx = HttpContext.Current;
-    if (ctx != null && ctx.Items["NHibernateRequestId"] != null)
-    {
-        return ctx.Items["NHibernateRequestId"].ToString();
-    }
-
-    return System.Threading.Thread.CurrentThread.ManagedThreadId.ToString();
-}
-}
-
-
-<appender name="NHibernateGroupedSqlAppender" type="YourNamespace.NHibernateGroupedSqlAppender, YourAssemblyName">
-    <param name="FilePath" value="C:\\Logs\\AMS_SQL.log" />
-  </appender>
