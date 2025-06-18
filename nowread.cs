@@ -71,7 +71,7 @@ protected void Application_BeginRequest(object sender, EventArgs e)
     var query = request.QueryString.ToString();
     var fullUrl = !string.IsNullOrEmpty(query) ? $"{url}?{query}" : url;
 
-    var requestId = HttpContext.Current.TraceIdentifier;
+    var requestId = GetRequestId();
     NHibernateGroupedSqlAppender.SetRequestInfo(requestId, $"{method}: {fullUrl}");
 }
 
@@ -82,10 +82,21 @@ protected void Application_EndRequest(object sender, EventArgs e)
     {
         if (appender is NHibernateGroupedSqlAppender customAppender)
         {
-            var requestId = HttpContext.Current.TraceIdentifier;
+            var requestId = GetRequestId();
             NHibernateGroupedSqlAppender.Flush(requestId, customAppender);
         }
     }
+}
+    private string GetRequestId()
+{
+    var ctx = HttpContext.Current;
+    if (ctx != null && ctx.Items["NHibernateRequestId"] != null)
+    {
+        return ctx.Items["NHibernateRequestId"].ToString();
+    }
+
+    return System.Threading.Thread.CurrentThread.ManagedThreadId.ToString();
+}
 }
 
 
