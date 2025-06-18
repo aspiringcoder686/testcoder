@@ -1,36 +1,22 @@
-using NHibernate;
-using NHibernate.Cfg;
-
-public static class NHibernateInitializer
+protected void Application_BeginRequest(object sender, EventArgs e)
 {
-    private static ISessionFactory _sessionFactory;
+    var url = HttpContext.Current.Request.Url.AbsolutePath;
+    var method = HttpContext.Current.Request.HttpMethod;
 
-    public static ISessionFactory Initialize()
-    {
-        if (_sessionFactory != null)
-            return _sessionFactory;
-
-        var cfg = new Configuration();
-
-        // Your connection and dialect
-        cfg.SetProperty(NHibernate.Cfg.Environment.ConnectionString, "Data Source=YOUR_SERVER;Initial Catalog=YOUR_DB;Integrated Security=True");
-        cfg.SetProperty(NHibernate.Cfg.Environment.Dialect, "NHibernate.Dialect.MsSql2012Dialect");
-
-        // 👇 ADD THESE TWO LINES
-        cfg.SetProperty(NHibernate.Cfg.Environment.ShowSql, "true");     // This shows the SQL
-        cfg.SetProperty(NHibernate.Cfg.Environment.FormatSql, "true");   // Nicely formats the SQL
-
-        // Load mappings (XML or assembly)
-        cfg.AddAssembly(typeof(YourEntityClass).Assembly);  // Replace with one of your mapped entities
-
-        _sessionFactory = cfg.BuildSessionFactory();
-
-        return _sessionFactory;
-    }
+    var queryString = HttpContext.Current.Request.QueryString.ToString();
+    log4net.ThreadContext.Properties["Url"] = url;
+    log4net.ThreadContext.Properties["HttpMethod"] = method;
+    log4net.ThreadContext.Properties["Query"] = queryString;
 }
 
-
-using (var session = NHibernateInitializer.Initialize().OpenSession())
+protected void Application_EndRequest(object sender, EventArgs e)
 {
-    // Your existing code
+    log4net.ThreadContext.Properties.Remove("Url");
+    log4net.ThreadContext.Properties.Remove("HttpMethod");
+    log4net.ThreadContext.Properties.Remove("Query");  // If you added query string logging
 }
+
+<conversionPattern value="--- Starts query ---%newline%date %-5level %logger - [Url: %property{Url}] [HttpMethod: %property{HttpMethod}] %message%newline--- Ends query ---%newline" />
+
+
+    [Query: %property{Query}]
