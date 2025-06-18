@@ -44,11 +44,22 @@ public class NHibernateGroupedSqlAppender : AppenderSkeleton
         }
     }
 
-    private string GetRequestId()
+   private string GetRequestId()
+{
+    var ctx = HttpContext.Current;
+    if (ctx != null)
     {
-        return HttpContext.Current?.TraceIdentifier 
-            ?? System.Threading.Thread.CurrentThread.ManagedThreadId.ToString();
+        // Generate unique ID per request
+        if (ctx.Items["NHibernateRequestId"] == null)
+        {
+            ctx.Items["NHibernateRequestId"] = Guid.NewGuid().ToString();
+        }
+        return ctx.Items["NHibernateRequestId"].ToString();
     }
+
+    // Fallback: thread ID
+    return System.Threading.Thread.CurrentThread.ManagedThreadId.ToString();
+}
 }
 
 
