@@ -1,45 +1,49 @@
 public static EntityDefinition Parse(string path)
 {
-    var doc = XDocument.Load(path);
+    XDocument doc = XDocument.Load(path);
     XNamespace ns = doc.Root.GetDefaultNamespace();
 
-    var hbmRoot = doc.Element(ns + "hibernate-mapping");
+    XElement? hbmRoot = doc.Element(ns + "hibernate-mapping");
     string parentNamespace = hbmRoot?.Attribute("namespace")?.Value ?? "";
 
-    var classElement = doc.Descendants(ns + "class").FirstOrDefault();
+    XElement? classElement = doc.Descendants(ns + "class").FirstOrDefault();
     if (classElement == null) return null;
 
     string fullParentClass = classElement.Attribute("name")?.Value ?? "";
 
-    var entity = new EntityDefinition
+    EntityDefinition entity = new()
     {
         Name = fullParentClass.Split('.').Last(),
+        Namespace = parentNamespace,
         Table = classElement.Attribute("table")?.Value,
-        Properties = new List<PropertyDefinition>(),
-        CompositeKey = new List<CompositeKeyDefinition>(),
-        Components = new List<ComponentDefinition>(),
-        Relationships = new List<RelationshipDefinition>(),
-        Queries = new List<QueryDefinition>(),
+        IdColumn = classElement.Element(ns + "id")?.Attribute("column")?.Value,
+        Properties = [],
+        CompositeKey = null,
+        Components = null,
+        Relationships = [],
+        Queries = []
     };
 
     // ID
-    var idElement = classElement.Element(ns + "id");
+    XElement? idElement = classElement.Element(ns + "id");
     if (idElement != null)
     {
         entity.Properties.Add(new PropertyDefinition
         {
             Name = idElement.Attribute("name")?.Value ?? "Id",
             Column = idElement.Attribute("column")?.Value,
-            Type = idElement.Attribute("type")?.Value ?? "string"
+            Type = idElement.Attribute("type")?.Value ?? "string",
+            IsPrimary = true
         });
     }
 
     // Composite ID
-    var compositeId = classElement.Element(ns + "composite-id");
+    XElement? compositeId = classElement.Element(ns + "composite-id");
     if (compositeId != null)
     {
-        foreach (var keyProp in compositeId.Elements(ns + "key-property"))
+        foreach (XElement keyProp in compositeId.Elements(ns + "key-property"))
         {
+            entity.CompositeKey ??= [];
             entity.CompositeKey.Add(new CompositeKeyDefinition
             {
                 Name = keyProp.Attribute("name")?.Value,
@@ -48,8 +52,9 @@ public static EntityDefinition Parse(string path)
             });
         }
 
-        foreach (var keyRel in compositeId.Elements(ns + "key-many-to-one"))
+        foreach (XElement keyRel in compositeId.Elements(ns + "key-many-to-one"))
         {
+            entity.CompositeKey ??= [];
             entity.CompositeKey.Add(new CompositeKeyDefinition
             {
                 Name = keyRel.Attribute("name")?.Value,
@@ -60,31 +65,21 @@ public static EntityDefinition Parse(string path)
         }
     }
 
-    // Properties
-    foreach (var prop in classElement.Elements(ns + "property"))
+    // Component
+    foreach (XElement comp in classElement.Elements(ns + "component"))
     {
-        entity.Properties.Add(new PropertyDefinition
-        {
-            Name = prop.Attribute("name")?.Value,
-            Column = prop.Attribute("column")?.Value ?? prop.Attribute("name")?.Value,
-            Type = prop.Attribute("type")?.Value ?? "string"
-        });
-    }
-
-    // Components
-    foreach (var comp in classElement.Elements(ns + "component"))
-    {
-        var compDef = new ComponentDefinition
+        entity.Components ??= [];
+        ComponentDefinition compDef = new()
         {
             Name = comp.Attribute("name")?.Value,
             Class = comp.Attribute("class")?.Value,
-            Properties = new List<PropertyDefinition>(),
-            Relationships = new List<RelationshipDefinition>(),
+            Properties = [],
+            Relationships = [],
             Insert = comp.Attribute("insert")?.Value,
             Update = comp.Attribute("update")?.Value,
         };
 
-        foreach (var prop in comp.Elements(ns + "property"))
+        foreach (XElement prop in comp.Elements(ns + "property"))
         {
             compDef.Properties.Add(new PropertyDefinition
             {
@@ -94,7 +89,7 @@ public static EntityDefinition Parse(string path)
             });
         }
 
-        foreach (var rel in comp.Elements(ns + "many-to-one"))
+        foreach (XElement rel in comp.Elements(ns + "many-to-one"))
         {
             compDef.Relationships.Add(new RelationshipDefinition
             {
@@ -108,8 +103,19 @@ public static EntityDefinition Parse(string path)
         entity.Components.Add(compDef);
     }
 
+    // Properties
+    foreach (XElement prop in classElement.Elements(ns + "property"))
+    {
+        entity.Properties.Add(new PropertyDefinition
+        {
+            Name = prop.Attribute("name")?.Value,
+            Column = prop.Attribute("column")?.Value ?? prop.Attribute("name")?.Value,
+            Type = prop.Attribute("type")?.Value ?? "string"
+        });
+    }
+
     // Relationships
-    foreach (var rel in classElement.Elements())
+    foreach (XElement rel in classElement.Elements())
     {
         if (rel.Name.LocalName == "many-to-one")
         {
@@ -136,7 +142,7 @@ public static EntityDefinition Parse(string path)
         }
         else if (rel.Name.LocalName == "bag")
         {
-            var relDef = new RelationshipDefinition
+            RelationshipDefinition relDef = new()
             {
                 Name = rel.Attribute("name")?.Value,
                 Type = "bag",
@@ -153,19 +159,17 @@ public static EntityDefinition Parse(string path)
 
             if (manyToMany != null)
             {
-                string originalClass = manyToMany.Attribute("class")?.Value;
-                relDef.Class = NormalizeClassName(originalClass, parentNamespace);
+                string normalizedClass = NormalizeClassName(manyToMany.Attribute("class")?.Value, parentNamespace);
+                relDef.Class = normalizedClass;
                 relDef.InnerType = "many-to-many";
-                //relDef.ManyToManyClass = relDef.Class;
                 relDef.DestinationColumn = manyToMany.Attribute("column")?.Value;
                 relDef.NotFound = manyToMany.Attribute("not-found")?.Value;
             }
             else if (oneToMany != null)
             {
-                string originalClass = oneToMany.Attribute("class")?.Value;
-                relDef.Class = NormalizeClassName(originalClass, parentNamespace);
+                string normalizedClass = NormalizeClassName(oneToMany.Attribute("class")?.Value, parentNamespace);
+                relDef.Class = normalizedClass;
                 relDef.InnerType = "one-to-many";
-                //relDef.OneToManyClass = relDef.Class;
                 relDef.DestinationColumn = relDef.SourceColumn;
                 relDef.NotFound = oneToMany.Attribute("not-found")?.Value;
             }
@@ -174,7 +178,7 @@ public static EntityDefinition Parse(string path)
         }
     }
 
-    // Queries
+    // Queries (same as before)
     if (!string.IsNullOrWhiteSpace(entity.Table))
     {
         entity.Queries.Add(new QueryDefinition
@@ -184,45 +188,46 @@ public static EntityDefinition Parse(string path)
         });
     }
 
-    foreach (var query in doc.Descendants(ns + "query"))
+    foreach (XElement query in doc.Descendants(ns + "query"))
     {
         entity.Queries.Add(new QueryDefinition
         {
             Name = SimplifyQueryName(query.Attribute("name")?.Value),
             Sql = XmlGenerator.ConvertToNativeSql(query.Value ?? "", entity.Name, entity.Table, entity)
-                  .Replace("\n", " ").Replace("\r", " ").Trim(),
+                .Replace("\n", " ").Replace("\r", " ").Replace("\t", " ").Trim(),
             Cacheable = string.Equals(query.Attribute("cacheable")?.Value, "true", StringComparison.OrdinalIgnoreCase) ? true : null
         });
     }
 
-    foreach (var query in doc.Descendants(ns + "sql-query"))
+    foreach (XElement query in doc.Descendants(ns + "sql-query"))
     {
         entity.Queries.Add(new QueryDefinition
         {
             Name = SimplifyQueryName(query.Attribute("name")?.Value),
             Sql = XmlGenerator.ConvertToNativeSql(query.Value ?? "", entity.Name, entity.Table, entity)
-                  .Replace("\n", " ").Replace("\r", " ").Trim()
+                .Replace("\n", " ").Replace("\r", " ").Replace("\t", " ").Trim(),
+            Cacheable = string.Equals(query.Attribute("cacheable")?.Value, "true", StringComparison.OrdinalIgnoreCase) ? true : null,
+            QueryType = "SqlQuery"
         });
     }
 
     // FindById
-    bool hasId = entity.Properties.Any(p => p.Name.Equals("Id", StringComparison.OrdinalIgnoreCase) || p.Name.ToLower().Contains("id"))
-                 || entity.CompositeKey.Any();
+    bool hasId = entity.Properties.Any(p => p.IsPrimary == true)
+                  || (entity.CompositeKey != null && entity.CompositeKey.Count != 0);
 
     bool hasFindById = entity.Queries.Any(q => q.Name.Equals("FindById", StringComparison.OrdinalIgnoreCase));
 
-    if (hasId && !hasFindById)
+    if (hasId && !hasFindById && !string.IsNullOrEmpty(entity.Table))
     {
         string whereClause = "";
-
-        if (entity.CompositeKey.Any())
+        if (entity.CompositeKey != null && entity.CompositeKey.Count != 0)
         {
             whereClause = string.Join(" AND ", entity.CompositeKey.Select(k => $"{k.Column} = @{k.Column}"));
         }
         else
         {
-            var idProp = entity.Properties.First(p => p.Name.Equals("Id", StringComparison.OrdinalIgnoreCase) || p.Name.ToLower().Contains("id"));
-            whereClause = $"{idProp.Column} = @{idProp.Column}";
+            var idProp = entity.Properties.First(p => p.IsPrimary == true);
+            whereClause = $"{idProp.Column} = @Id";
         }
 
         entity.Queries.Add(new QueryDefinition
@@ -234,35 +239,3 @@ public static EntityDefinition Parse(string path)
 
     return entity;
 }
-
-
-  public class RelationshipDefinition
-  {
-      public string Name { get; set; }
-      public string Type { get; set; }  // bag, many-to-one, etc.
-      public string InnerType { get; set; }
-      public string Class { get; set; }
-     // public string OneToManyClass { get; set; }
-      //public string ManyToManyClass { get; set; }
-
-      [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
-      public string SourceColumn { get; set; }
-
-      [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
-      public string DestinationColumn { get; set; }
-
-      [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
-      public string Lazy { get; set; }
-
-      [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
-      public string Cascade { get; set; }
-
-      [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
-      public string Inverse { get; set; }
-
-      [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
-      public string PropertyRef { get; set; }
-
-      [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
-      public string NotFound { get; set; }
-  }
