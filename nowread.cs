@@ -1,105 +1,131 @@
-public class ClassInfo
+var (classInfos, appsettings) = LoadSpringConfig(doc);
+
+using System.Xml.Linq;
+using System.Text.RegularExpressions;
+
+public static (List<ClassInfo> classInfos, Dictionary<string, object> appsettings) LoadSpringConfig(XDocument doc)
 {
-    public string Key { get; set; }                      // The object id (capitalized)
-    public string Type { get; set; }                     // The fully-qualified type name
-    public int PropertyCount { get; set; }               // Number of properties defined
-    public int DependencyCount { get; set; }             // Number of ref dependencies (constructor + property)
-    public string Lifetime { get; set; }                 // "Singleton" or "Scoped"
-    public string HasInlineObject { get; set; }          // "Yes" / "No"
-    public string HasListOrDictionary { get; set; }      // "Yes" / "No"
-    public int ConstructorArgCount { get; set; }         // Number of constructor args (value + ref)
-    public double ComplexityScore { get; set; }          // Computed score based on our formula
-    public string ComplexityCategory { get; set; }       // "Simple" / "Medium" / "Complex"
-}
+    var classInfos = new List<ClassInfo>();
+    var appsettings = new Dictionary<string, object>();
 
-
-using ClosedXML.Excel;
-using Newtonsoft.Json;
-
-void GenerateExcel(Dictionary<string, object> appsettings, List<ClassInfo> classInfos)
-{
-    var wb = new XLWorkbook();
-
-    // ---------------- CONFIGURATION SHEET -----------------
-    var configSheet = wb.Worksheets.Add("Configuration");
-    int configRow = 1;
-
-    configSheet.Cell(configRow, 1).Value = "SNo";
-    configSheet.Cell(configRow, 2).Value = "EntityName";
-    configSheet.Cell(configRow, 3).Value = "Key";
-    configSheet.Cell(configRow, 4).Value = "Value";
-    configSheet.Range(configRow, 1, configRow, 4).Style.Font.Bold = true;
-
-    configRow++;
-    int configSno = 1;
-
-    foreach (var entity in appsettings)
+    foreach (var obj in doc.Descendants().Where(x => x.Name.LocalName == "object"))
     {
-        var entityName = entity.Key;
-        if (entity.Value is Dictionary<string, object> props)
+        var id = obj.Attribute("id")?.Value;
+        var type = obj.Attribute("type")?.Value;
+        var singleton = obj.Attribute("singleton")?.Value ?? "true";
+
+        if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(type))
+            continue; // skip anonymous / malformed
+
+        var key = Capitalize(id);
+        var classInfo = new ClassInfo
         {
-            foreach (var prop in props)
+            Key = key,
+            Type = type,
+            Lifetime = singleton == "true" ? "Singleton" : "Scoped",
+            PropertyCount = 0,
+            DependencyCount = 0,
+            ConstructorArgCount = 0,
+            HasInlineObject = "No",
+            HasListOrDictionary = "No"
+        };
+
+        var propsDict = new Dictionary<string, object>();
+
+        // Constructor args
+        var ctorArgs = obj.Elements().Where(e => e.Name.LocalName == "constructor-arg").ToList();
+        classInfo.ConstructorArgCount = ctorArgs.Count;
+        classInfo.DependencyCount += ctorArgs.Count(e => !string.IsNullOrEmpty(e.Attribute("ref")?.Value));
+
+        // Properties
+        var props = obj.Elements().Where(e => e.Name.LocalName == "property").ToList();
+        classInfo.PropertyCount = props.Count;
+
+        foreach (var prop in props)
+        {
+            var propName = Capitalize(prop.Attribute("name")?.Value);
+            var val = prop.Attribute("value")?.Value;
+            var refVal = prop.Attribute("ref")?.Value;
+
+            if (!string.IsNullOrEmpty(val))
+                propsDict[propName] = val;
+
+            if (!string.IsNullOrEmpty(refVal))
+                classInfo.DependencyCount++;
+
+            // Inline object
+            var inlineObj = prop.Elements().FirstOrDefault(e => e.Name.LocalName == "object");
+            if (inlineObj != null)
             {
-                configSheet.Cell(configRow, 1).Value = configSno;
-                configSheet.Cell(configRow, 2).Value = entityName;
-                configSheet.Cell(configRow, 3).Value = prop.Key;
+                classInfo.HasInlineObject = "Yes";
+                var inlineProps = ParseInlineObject(inlineObj);
+                propsDict[propName] = inlineProps;
+            }
 
-                if (prop.Value is Dictionary<string, object> || prop.Value is List<object>)
-                {
-                    configSheet.Cell(configRow, 4).Value = JsonConvert.SerializeObject(prop.Value, Formatting.None);
-                }
-                else
-                {
-                    configSheet.Cell(configRow, 4).Value = prop.Value?.ToString();
-                }
+            // Dictionary
+            var dictElem = prop.Elements().FirstOrDefault(e => e.Name.LocalName == "dictionary");
+            if (dictElem != null)
+            {
+                classInfo.HasListOrDictionary = "Yes";
+                var dict = dictElem.Elements()
+                    .Where(e => e.Name.LocalName == "entry")
+                    .ToDictionary(
+                        e => e.Attribute("key")?.Value,
+                        e => e.Attribute("value")?.Value
+                    );
+                propsDict[propName] = dict;
+            }
 
-                configRow++;
-                configSno++;
+            // List
+            var listElem = prop.Elements().FirstOrDefault(e => e.Name.LocalName == "list");
+            if (listElem != null)
+            {
+                classInfo.HasListOrDictionary = "Yes";
+                var list = listElem.Elements()
+                    .Where(e => e.Name.LocalName == "value")
+                    .Select(e => e.Value)
+                    .ToList();
+                propsDict[propName] = list;
             }
         }
+
+        appsettings[key] = propsDict;
+
+        // Compute complexity
+        classInfo.ComplexityScore =
+            classInfo.PropertyCount * 1.0 +
+            classInfo.DependencyCount * 2.0 +
+            classInfo.ConstructorArgCount * 1.5 +
+            (classInfo.HasInlineObject == "Yes" ? 5.0 : 0.0) +
+            (classInfo.HasListOrDictionary == "Yes" ? 5.0 : 0.0) +
+            (classInfo.Lifetime == "Scoped" ? 1.0 : 0.0);
+
+        classInfo.ComplexityCategory =
+            classInfo.ComplexityScore < 15 ? "Simple" :
+            classInfo.ComplexityScore < 25 ? "Medium" : "Complex";
+
+        classInfos.Add(classInfo);
     }
-    configSheet.Columns().AdjustToContents();
 
-    // ---------------- METRICS SHEET -----------------
-    var metricsSheet = wb.Worksheets.Add("Metrics");
-    int metricsRow = 1;
+    return (classInfos, appsettings);
+}
 
-    metricsSheet.Cell(metricsRow, 1).Value = "SNo";
-    metricsSheet.Cell(metricsRow, 2).Value = "Key";
-    metricsSheet.Cell(metricsRow, 3).Value = "Type";
-    metricsSheet.Cell(metricsRow, 4).Value = "NoOfProperties";
-    metricsSheet.Cell(metricsRow, 5).Value = "NoOfDependentClasses";
-    metricsSheet.Cell(metricsRow, 6).Value = "SingletonOrScoped";
-    metricsSheet.Cell(metricsRow, 7).Value = "HasInlineObject";
-    metricsSheet.Cell(metricsRow, 8).Value = "HasListOrDictionary";
-    metricsSheet.Cell(metricsRow, 9).Value = "ConstructorArgCount";
-    metricsSheet.Cell(metricsRow, 10).Value = "ComplexityScore";
-    metricsSheet.Cell(metricsRow, 11).Value = "ComplexityCategory";
-    metricsSheet.Range(metricsRow, 1, metricsRow, 11).Style.Font.Bold = true;
-
-    metricsRow++;
-    int metricsSno = 1;
-
-    foreach (var info in classInfos)
+// Helper functions
+public static Dictionary<string, object> ParseInlineObject(XElement innerObj)
+{
+    var result = new Dictionary<string, object>();
+    foreach (var prop in innerObj.Elements().Where(x => x.Name.LocalName == "property"))
     {
-        metricsSheet.Cell(metricsRow, 1).Value = metricsSno;
-        metricsSheet.Cell(metricsRow, 2).Value = info.Key;
-        metricsSheet.Cell(metricsRow, 3).Value = info.Type;
-        metricsSheet.Cell(metricsRow, 4).Value = info.PropertyCount;
-        metricsSheet.Cell(metricsRow, 5).Value = info.DependencyCount;
-        metricsSheet.Cell(metricsRow, 6).Value = info.Lifetime;
-        metricsSheet.Cell(metricsRow, 7).Value = info.HasInlineObject;
-        metricsSheet.Cell(metricsRow, 8).Value = info.HasListOrDictionary;
-        metricsSheet.Cell(metricsRow, 9).Value = info.ConstructorArgCount;
-        metricsSheet.Cell(metricsRow, 10).Value = info.ComplexityScore;
-        metricsSheet.Cell(metricsRow, 11).Value = info.ComplexityCategory;
-
-        metricsRow++;
-        metricsSno++;
+        var name = Capitalize(prop.Attribute("name")?.Value);
+        var val = prop.Attribute("value")?.Value;
+        if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(val))
+            result[name] = val;
     }
-    metricsSheet.Columns().AdjustToContents();
+    return result;
+}
 
-    // ---------------- SAVE EXCEL -----------------
-    wb.SaveAs("SpringConfigSummary.xlsx");
-    Console.WriteLine("✅ SpringConfigSummary.xlsx written with Configuration + Metrics sheets.");
+public static string Capitalize(string input)
+{
+    if (string.IsNullOrEmpty(input)) return input;
+    return char.ToUpper(input[0]) + input.Substring(1);
 }
