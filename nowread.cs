@@ -1,11 +1,8 @@
-var innerObj = prop.Elements().FirstOrDefault(e => e.Name.LocalName == "object");
-                    if (innerObj != null)
-                    {
-                        var inlineProps = ParseInlineObject(innerObj);
-                        AddToAppSettings(appsettings, id, name, inlineProps);
-                    }
-
-
+static string Capitalize(string input)
+{
+    if (string.IsNullOrEmpty(input)) return input;
+    return char.ToUpper(input[0]) + input.Substring(1);
+}
 static Dictionary<string, object> ParseInlineObject(XElement innerObj)
 {
     var result = new Dictionary<string, object>();
@@ -16,19 +13,8 @@ static Dictionary<string, object> ParseInlineObject(XElement innerObj)
 
         if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(val))
         {
-            result[name] = val;
+            result[Capitalize(name)] = val;
         }
     }
     return result;
-}
-
-static void AddToAppSettings(Dictionary<string, object> appsettings, string objId, string propName, object value)
-{
-    if (string.IsNullOrEmpty(objId)) return;
-
-    if (!appsettings.ContainsKey(objId))
-        appsettings[objId] = new Dictionary<string, object>();
-
-    var section = appsettings[objId] as Dictionary<string, object>;
-    section[propName] = value;
 }
