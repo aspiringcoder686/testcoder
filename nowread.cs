@@ -1,70 +1,117 @@
-public interface IRepository<T> where T : class
+using System.Linq.Expressions;
+
+public interface IGenericRepository<T> where T : class
 {
-    Task<T> GetByIdAsync(int id);
+    Task<T?> GetByIdAsync(object id);
+    Task<T?> GetByIdAsync(int id);
+    Task<T?> GetByIdAsync(long id);
+    Task<T?> GetByIdAsync(Guid id);
+
+    Task<T?> GetByPredicateAsync(Expression<Func<T, bool>> predicate);
     Task<IEnumerable<T>> GetAllAsync();
+    Task<IEnumerable<T>> FindAsync(Expression<Func<T, bool>> predicate);
+
     Task AddAsync(T entity);
-    Task DeleteAsync(T entity);
-    Task SaveChangesAsync();
+    Task AddRangeAsync(IEnumerable<T> entities);
+
+    void Update(T entity);
+    void Remove(T entity);
+    void RemoveRange(IEnumerable<T> entities);
+
+    Task<int> SaveChangesAsync();
 }
+using Microsoft.EntityFrameworkCore;
+using System.Linq.Expressions;
 
-
-public class Repository<T> : IRepository<T> where T : class
+public class GenericRepository<T> : IGenericRepository<T> where T : class
 {
-    protected readonly YourDbContext _context;
+    private readonly DbContext _context;
     protected readonly DbSet<T> _dbSet;
 
-    public Repository(YourDbContext context)
+    public GenericRepository(DbContext context)
     {
         _context = context;
-        _dbSet = _context.Set<T>();
+        _dbSet = context.Set<T>();
     }
 
-    public Task<T> GetByIdAsync(int id) => _dbSet.FindAsync(id).AsTask();
-    public Task<IEnumerable<T>> GetAllAsync() => Task.FromResult(_dbSet.AsEnumerable());
-    public Task AddAsync(T entity) => _dbSet.AddAsync(entity).AsTask();
-    public Task DeleteAsync(T entity)
+    public async Task<T?> GetByIdAsync(object id)
+    {
+        if (id == null)
+            throw new ArgumentNullException(nameof(id));
+
+        return await _dbSet.FindAsync(id);
+    }
+
+    public Task<T?> GetByIdAsync(int id) => GetByIdAsync((object)id);
+    public Task<T?> GetByIdAsync(long id) => GetByIdAsync((object)id);
+    public Task<T?> GetByIdAsync(Guid id) => GetByIdAsync((object)id);
+
+    public async Task<T?> GetByPredicateAsync(Expression<Func<T, bool>> predicate)
+    {
+        return await _dbSet.FirstOrDefaultAsync(predicate);
+    }
+
+    public async Task<IEnumerable<T>> GetAllAsync()
+    {
+        return await _dbSet.ToListAsync();
+    }
+
+    public async Task<IEnumerable<T>> FindAsync(Expression<Func<T, bool>> predicate)
+    {
+        return await _dbSet.Where(predicate).ToListAsync();
+    }
+
+    public async Task AddAsync(T entity)
+    {
+        await _dbSet.AddAsync(entity);
+    }
+
+    public async Task AddRangeAsync(IEnumerable<T> entities)
+    {
+        await _dbSet.AddRangeAsync(entities);
+    }
+
+    public void Update(T entity)
+    {
+        _dbSet.Update(entity);
+    }
+
+    public void Remove(T entity)
     {
         _dbSet.Remove(entity);
-        return Task.CompletedTask;
     }
 
-    public Task SaveChangesAsync() => _context.SaveChangesAsync();
-}
-
-
-public interface ICustomerRepository : IRepository<Customer>
-{
-    Task<IEnumerable<Customer>> GetHighValueCustomersAsync();
-}
-
-
-public class CustomerRepository : Repository<Customer>, ICustomerRepository
-{
-    public CustomerRepository(YourDbContext context) : base(context) { }
-
-    public async Task<IEnumerable<Customer>> GetHighValueCustomersAsync()
+    public void RemoveRange(IEnumerable<T> entities)
     {
-        return await _dbSet.Where(c => c.TotalValue > 100000).ToListAsync();
+        _dbSet.RemoveRange(entities);
+    }
+
+    public async Task<int> SaveChangesAsync()
+    {
+        return await _context.SaveChangesAsync();
     }
 }
 
 
 public class CustomerService
 {
-    private readonly ICustomerRepository _customerRepo;
+    private readonly IGenericRepository<Customer> _customerRepo;
 
-    public CustomerService(ICustomerRepository customerRepo)
+    public CustomerService(IGenericRepository<Customer> customerRepo)
     {
         _customerRepo = customerRepo;
     }
 
-    public Task<IEnumerable<Customer>> GetHighValueCustomersAsync()
+    public async Task<Customer?> GetCustomerAsync(Guid id)
     {
-        return _customerRepo.GetHighValueCustomersAsync();
+        return await _customerRepo.GetByIdAsync(id);
     }
 
-    public Task AddCustomerAsync(Customer customer)
+    public async Task<IEnumerable<Customer>> GetActiveCustomers()
     {
-        return _customerRepo.AddAsync(customer);
+        return await _customerRepo.FindAsync(c => c.IsActive);
     }
+
+    //var user = await _repo.GetByPredicateAsync(u => u.Id == 5);
+
 }
