@@ -1,131 +1,70 @@
-var (classInfos, appsettings) = LoadSpringConfig(doc);
-
-using System.Xml.Linq;
-using System.Text.RegularExpressions;
-
-public static (List<ClassInfo> classInfos, Dictionary<string, object> appsettings) LoadSpringConfig(XDocument doc)
+public interface IRepository<T> where T : class
 {
-    var classInfos = new List<ClassInfo>();
-    var appsettings = new Dictionary<string, object>();
-
-    foreach (var obj in doc.Descendants().Where(x => x.Name.LocalName == "object"))
-    {
-        var id = obj.Attribute("id")?.Value;
-        var type = obj.Attribute("type")?.Value;
-        var singleton = obj.Attribute("singleton")?.Value ?? "true";
-
-        if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(type))
-            continue; // skip anonymous / malformed
-
-        var key = Capitalize(id);
-        var classInfo = new ClassInfo
-        {
-            Key = key,
-            Type = type,
-            Lifetime = singleton == "true" ? "Singleton" : "Scoped",
-            PropertyCount = 0,
-            DependencyCount = 0,
-            ConstructorArgCount = 0,
-            HasInlineObject = "No",
-            HasListOrDictionary = "No"
-        };
-
-        var propsDict = new Dictionary<string, object>();
-
-        // Constructor args
-        var ctorArgs = obj.Elements().Where(e => e.Name.LocalName == "constructor-arg").ToList();
-        classInfo.ConstructorArgCount = ctorArgs.Count;
-        classInfo.DependencyCount += ctorArgs.Count(e => !string.IsNullOrEmpty(e.Attribute("ref")?.Value));
-
-        // Properties
-        var props = obj.Elements().Where(e => e.Name.LocalName == "property").ToList();
-        classInfo.PropertyCount = props.Count;
-
-        foreach (var prop in props)
-        {
-            var propName = Capitalize(prop.Attribute("name")?.Value);
-            var val = prop.Attribute("value")?.Value;
-            var refVal = prop.Attribute("ref")?.Value;
-
-            if (!string.IsNullOrEmpty(val))
-                propsDict[propName] = val;
-
-            if (!string.IsNullOrEmpty(refVal))
-                classInfo.DependencyCount++;
-
-            // Inline object
-            var inlineObj = prop.Elements().FirstOrDefault(e => e.Name.LocalName == "object");
-            if (inlineObj != null)
-            {
-                classInfo.HasInlineObject = "Yes";
-                var inlineProps = ParseInlineObject(inlineObj);
-                propsDict[propName] = inlineProps;
-            }
-
-            // Dictionary
-            var dictElem = prop.Elements().FirstOrDefault(e => e.Name.LocalName == "dictionary");
-            if (dictElem != null)
-            {
-                classInfo.HasListOrDictionary = "Yes";
-                var dict = dictElem.Elements()
-                    .Where(e => e.Name.LocalName == "entry")
-                    .ToDictionary(
-                        e => e.Attribute("key")?.Value,
-                        e => e.Attribute("value")?.Value
-                    );
-                propsDict[propName] = dict;
-            }
-
-            // List
-            var listElem = prop.Elements().FirstOrDefault(e => e.Name.LocalName == "list");
-            if (listElem != null)
-            {
-                classInfo.HasListOrDictionary = "Yes";
-                var list = listElem.Elements()
-                    .Where(e => e.Name.LocalName == "value")
-                    .Select(e => e.Value)
-                    .ToList();
-                propsDict[propName] = list;
-            }
-        }
-
-        appsettings[key] = propsDict;
-
-        // Compute complexity
-        classInfo.ComplexityScore =
-            classInfo.PropertyCount * 1.0 +
-            classInfo.DependencyCount * 2.0 +
-            classInfo.ConstructorArgCount * 1.5 +
-            (classInfo.HasInlineObject == "Yes" ? 5.0 : 0.0) +
-            (classInfo.HasListOrDictionary == "Yes" ? 5.0 : 0.0) +
-            (classInfo.Lifetime == "Scoped" ? 1.0 : 0.0);
-
-        classInfo.ComplexityCategory =
-            classInfo.ComplexityScore < 15 ? "Simple" :
-            classInfo.ComplexityScore < 25 ? "Medium" : "Complex";
-
-        classInfos.Add(classInfo);
-    }
-
-    return (classInfos, appsettings);
+    Task<T> GetByIdAsync(int id);
+    Task<IEnumerable<T>> GetAllAsync();
+    Task AddAsync(T entity);
+    Task DeleteAsync(T entity);
+    Task SaveChangesAsync();
 }
 
-// Helper functions
-public static Dictionary<string, object> ParseInlineObject(XElement innerObj)
+
+public class Repository<T> : IRepository<T> where T : class
 {
-    var result = new Dictionary<string, object>();
-    foreach (var prop in innerObj.Elements().Where(x => x.Name.LocalName == "property"))
+    protected readonly YourDbContext _context;
+    protected readonly DbSet<T> _dbSet;
+
+    public Repository(YourDbContext context)
     {
-        var name = Capitalize(prop.Attribute("name")?.Value);
-        var val = prop.Attribute("value")?.Value;
-        if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(val))
-            result[name] = val;
+        _context = context;
+        _dbSet = _context.Set<T>();
     }
-    return result;
+
+    public Task<T> GetByIdAsync(int id) => _dbSet.FindAsync(id).AsTask();
+    public Task<IEnumerable<T>> GetAllAsync() => Task.FromResult(_dbSet.AsEnumerable());
+    public Task AddAsync(T entity) => _dbSet.AddAsync(entity).AsTask();
+    public Task DeleteAsync(T entity)
+    {
+        _dbSet.Remove(entity);
+        return Task.CompletedTask;
+    }
+
+    public Task SaveChangesAsync() => _context.SaveChangesAsync();
 }
 
-public static string Capitalize(string input)
+
+public interface ICustomerRepository : IRepository<Customer>
 {
-    if (string.IsNullOrEmpty(input)) return input;
-    return char.ToUpper(input[0]) + input.Substring(1);
+    Task<IEnumerable<Customer>> GetHighValueCustomersAsync();
+}
+
+
+public class CustomerRepository : Repository<Customer>, ICustomerRepository
+{
+    public CustomerRepository(YourDbContext context) : base(context) { }
+
+    public async Task<IEnumerable<Customer>> GetHighValueCustomersAsync()
+    {
+        return await _dbSet.Where(c => c.TotalValue > 100000).ToListAsync();
+    }
+}
+
+
+public class CustomerService
+{
+    private readonly ICustomerRepository _customerRepo;
+
+    public CustomerService(ICustomerRepository customerRepo)
+    {
+        _customerRepo = customerRepo;
+    }
+
+    public Task<IEnumerable<Customer>> GetHighValueCustomersAsync()
+    {
+        return _customerRepo.GetHighValueCustomersAsync();
+    }
+
+    public Task AddCustomerAsync(Customer customer)
+    {
+        return _customerRepo.AddAsync(customer);
+    }
 }
