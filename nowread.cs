@@ -1,3 +1,6 @@
+ IncludeGenerator.GenerateIncludeFile(typeof(AMSDbContext), "AmAsset", maxDepth: 3, dtoTypeName: "AssetDto");
+
+
 #nullable enable
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
