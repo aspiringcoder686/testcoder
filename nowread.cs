@@ -1,4 +1,36 @@
- IncludeGenerator.GenerateIncludeFile(typeof(AMSDbContext), "AmAsset", maxDepth: 3, dtoTypeName: "AssetDto");
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
+using System.Linq.Expressions;
+
+public static class EfIncludeExtensions
+{
+    public static IQueryable<TEntity> IncludeAllNavigations<TEntity>(
+        this IQueryable<TEntity> query,
+        DbContext context) where TEntity : class
+    {
+        var entityType = context.Model.FindEntityType(typeof(TEntity));
+        var navigations = entityType.GetNavigations();
+
+        foreach (var navigation in navigations)
+        {
+            var parameter = Expression.Parameter(typeof(TEntity), "e");
+            var property = Expression.Property(parameter, navigation.Name);
+            var lambda = Expression.Lambda(property, parameter);
+
+            query = query.Include((dynamic)lambda);
+        }
+
+        return query;
+    }
+}
+
+var allAssets = dbContext.AmAssets
+    .IncludeAllNavigations(dbContext) // auto-include all navigation properties
+    .ToList();
+
+
+
+IncludeGenerator.GenerateIncludeFile(typeof(AMSDbContext), "AmAsset", maxDepth: 3, dtoTypeName: "AssetDto");
 
 
 #nullable enable
