@@ -1,3 +1,20 @@
+ private readonly IUploadManagerResolver _resolver;
+    private readonly IBusinessRuleValidator _validator;
+ public BusinessRulesController(IUploadManagerResolver resolver, IBusinessRuleValidator validator)
+    {
+        _resolver  = resolver;
+        _validator = validator;
+    }
+
+var manager = _resolver.Resolve(req.TemplateCode);
+
+        // This is where uploadManager.BrVariables() is used
+        var (ok, error) = _validator.ValidateBrVariable(manager, req.Rule);
+
+builder.Services.AddSingleton<SmtUploadManager>(); // concrete manager
+builder.Services.AddSingleton<IUploadManagerResolver, UploadManagerResolver>();
+builder.Services.AddSingleton<IBusinessRuleValidator, BusinessRuleValidator>()
+    
 namespace YourApp.Models;
 
 public sealed class BusinessRuleDto
