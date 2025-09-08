@@ -13,7 +13,7 @@ namespace GeneratedQueries
         /// Auto-generated from HQL named query "ALL"
         /// HQL: SELECT * FROM am_reportperiod
         /// </summary>
-        public static Expression<Func<global::NowBet.AMS.Domain.Period.ReportingPeriod, bool>> ALL()
+        public static Expression<Func<global::eportingPeriod, bool>> ALL()
         {
             return x => true; // no WHERE
         }
@@ -22,7 +22,7 @@ namespace GeneratedQueries
         /// Auto-generated from HQL named query "FindAllMonthlyOrQuarterly"
         /// HQL: from ReportingPeriod period where (Type.Id = 'M' or Type.Id = 'Q') and EndDate = ?
         /// </summary>
-        public static Expression<Func<global::NowBet.AMS.Domain.Period.ReportingPeriod, bool>> FindAllMonthlyOrQuarterly(object p1)
+        public static Expression<Func<global::ReportingPeriod, bool>> FindAllMonthlyOrQuarterly(object p1)
         {
             return x => (Type.Id = 'M' or Type.Id = 'Q') and EndDate = p1;
         }
