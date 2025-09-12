@@ -14,25 +14,15 @@ namespace UnassignAnalyzer
         public static int Main(string[] args)
         {
             // 🔧 Set your source root here
-            string root = @"D:\0-AMS\AMSWeb\Main\WebApp";
+            string root = @"D:";
 
             // 🔧 Optional external NHibernate mapping directory (your example: D:\mapping)
-            string mappingDir = @"D:\mapping"; // leave as "" if you don't want to use it
+            string mappingDir = @"D:\"; // leave as "" if you don't want to use it
 
             // 🔧 Dynamic URL patterns (each line may contain multiple fragments separated by ';')
             var urls = new[]
             {
-                "AssetController.aspx?method=GetByAssetGuid; AssetController.aspx?a=Id",
-                "AssetController.aspx?assetId=",
-                "AssetController.aspx?a=ue",
-                "AssetController.aspx?method=UnassignAssetManagementCompany",
-                "AssetController.aspx?method=UnassignAssetPropertyManagementSystem",
-                "AssetContactController.aspx?method=GetContacts",
-                "AssetContactController.aspx?method=SaveContact",
-                "AssetContactController.aspx?method=DeleteContact",
-                "AssetTeamMembersController.aspx?method=LoadAvailableMembers; AssetTeamMembersController.aspx?method=LoadMembers; AssetTeamMembersController.aspx?method=LoadMemberTypes; AssetTeamMembersController.aspx?method=LoadMemberHistory",
-                "N/A",
-                "AssetTeamMembersController.aspx?method=Save"
+                
             };
 
             // 📦 Output holders (treated as directories; per-endpoint files will be written inside)
